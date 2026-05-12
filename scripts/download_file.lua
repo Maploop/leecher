@@ -9,7 +9,7 @@
 --]]
 
 --- Exit with an error message.
-local CHUNK_SIZE = 99 * 1024 * 1024  -- 99 MB in bytes
+local CHUNK_SIZE = 32 * 1024 * 1024  -- 32 MB in bytes
 
 local function die(msg)
   io.stderr:write("[ERROR] " .. msg .. "\n")
