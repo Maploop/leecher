@@ -67,7 +67,7 @@ end
 print("[INFO] Downloading...")
 local env = "DLURL=" .. "'" .. file_url:gsub("'", "'\\''") .. "'"
          .. " DLOUT=" .. "'" .. dest_path:gsub("'", "'\\''") .. "'"
-run("env " .. env .. " bash -c 'curl -L -f -sS -o \"$DLOUT\" \"$DLURL\"'")
+run("env " .. env .. " bash -c 'curl -L -f --progress-bar -o \"$DLOUT\" \"$DLURL\"'")
 
 -- Sanity check
 local f = io.open(dest_path, "rb")
