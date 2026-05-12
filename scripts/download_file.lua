@@ -1,17 +1,12 @@
 --[[
   download_file.lua
-  -----------------
   Downloads a file from FILE_URL and saves it to DEST_PATH inside the repo.
-  Called by the GitHub Actions workflow; reads configuration from environment variables.
 
   Environment variables (set by the workflow):
     FILE_URL   – direct download URL (required)
-    DEST_PATH  – relative destination path inside the repo (optional)
-                 If empty, the filename is inferred from the URL and the file
-                 is placed in an "uploads/" directory at the repo root.
+    DEST_PATH  – destination path inside the repo (optional)
+                 Defaults to "uploads/<filename from URL>"
 --]]
-
--- ── Helpers ──────────────────────────────────────────────────────────────────
 
 --- Exit with an error message.
 local function die(msg)
@@ -19,9 +14,19 @@ local function die(msg)
   os.exit(1)
 end
 
---- Extract the filename from a URL (last path segment, query string stripped).
+--- Run a command; die on failure. Works with Lua 5.1 and 5.4.
+local function run(cmd)
+  local result = os.execute(cmd)
+  -- Lua 5.4 returns true/false; Lua 5.1 returns exit code
+  local ok = (result == true) or (result == 0)
+  if not ok then
+    die("Command failed: " .. cmd)
+  end
+end
+
+--- Extract just the filename from a URL (last path segment before any ? or #).
 local function filename_from_url(url)
-  local name = url:match("/([^/?#]+)%??")
+  local name = url:match(".+/([^/?#]+)")
   if not name or name == "" then
     name = "downloaded_file"
   end
@@ -31,35 +36,6 @@ end
 --- Extract the directory portion of a path.
 local function dirname(path)
   return path:match("^(.*)/[^/]+$")
-end
-
-local function run_script(lines)
-  local tmp = os.tmpname()
-  local f = io.open(tmp, "w")
-  if not f then die("Cannot open temp file: " .. tmp) end
-  f:write("#!/bin/bash\nset -e\n")
-  for _, line in ipairs(lines) do
-    f:write(line .. "\n")
-  end
-  f:close()
-  os.execute("chmod +x " .. tmp)
-  local ok = os.execute(tmp)
-  os.remove(tmp)
-  return ok
-end
-
---- Write arguments to a temp env file, then source it in the script.
---- This is the safest way to pass arbitrary strings (URLs, paths) to bash.
-local function make_env_file(vars)
-  local tmp = os.tmpname()
-  local f = io.open(tmp, "w")
-  if not f then die("Cannot create env file") end
-  for k, v in pairs(vars) do
-    -- Use printf %s to write the value verbatim into the env file
-    f:write(k .. "=" .. "'" .. v:gsub("'", "'\\''") .. "'\n")
-  end
-  f:close()
-  return tmp
 end
 
 -- ── Main ─────────────────────────────────────────────────────────────────────
@@ -78,34 +54,20 @@ end
 print("[INFO] Source URL  : " .. file_url)
 print("[INFO] Destination : " .. dest_path)
 
--- Write URL and path into an env file so bash never needs to parse them inline
-local env_file = make_env_file({ FILE_URL = file_url, DEST_PATH = dest_path })
-
--- Create parent directory
+-- Create parent directory using a simple, direct approach
 local dir = dirname(dest_path)
-if dir then
+if dir and dir ~= "" then
   print("[INFO] Creating directory: " .. dir)
-  local ok = run_script({
-    ". " .. env_file,
-    'mkdir -p "$(dirname "$DEST_PATH")"'
-  })
-  if ok ~= 0 then
-    die("mkdir failed for: " .. dir)
-  end
+  -- Write dir into an env var so no quoting issues in the command
+  local env = "DLDIR=" .. "'" .. dir:gsub("'", "'\\''") .. "'"
+  run("env " .. env .. " bash -c 'mkdir -p \"$DLDIR\"'")
 end
 
--- Download the file
+-- Download the file — env vars carry the values, no inline quoting needed
 print("[INFO] Downloading...")
-local ok = run_script({
-  ". " .. env_file,
-  'curl -L -f -sS -o "$DEST_PATH" "$FILE_URL"'
-})
-
-os.remove(env_file)
-
-if ok ~= 0 then
-  die("curl failed. Check that FILE_URL is a valid, publicly accessible direct-download link.")
-end
+local env = "DLURL=" .. "'" .. file_url:gsub("'", "'\\''") .. "'"
+         .. " DLOUT=" .. "'" .. dest_path:gsub("'", "'\\''") .. "'"
+run("env " .. env .. " bash -c 'curl -L -f -sS -o \"$DLOUT\" \"$DLURL\"'")
 
 -- Sanity check
 local f = io.open(dest_path, "rb")
