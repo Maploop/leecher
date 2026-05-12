@@ -1,0 +1,3 @@
+filename=Biohazard_Beta_0.4.5_server_pack.zip
+chunks=10
+total_bytes=971966925
