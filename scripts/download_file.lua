@@ -30,17 +30,36 @@ end
 
 --- Extract the directory portion of a path.
 local function dirname(path)
-  return path:match("^(.*)/[^/]+$")  -- nil if no slash (file is in current dir)
+  return path:match("^(.*)/[^/]+$")
 end
 
---- Create directories recursively, delegating quoting to bash.
-local function mkdir_p(dir)
-  if not dir or dir == "" then return end
-  -- Pass dir as a positional argument so bash handles quoting safely
-  local ok = os.execute("bash -c 'mkdir -p \"$1\"' -- " .. string.format("%q", dir))
-  if ok ~= 0 then
-    die("Could not create directory: " .. dir)
+local function run_script(lines)
+  local tmp = os.tmpname()
+  local f = io.open(tmp, "w")
+  if not f then die("Cannot open temp file: " .. tmp) end
+  f:write("#!/bin/bash\nset -e\n")
+  for _, line in ipairs(lines) do
+    f:write(line .. "\n")
   end
+  f:close()
+  os.execute("chmod +x " .. tmp)
+  local ok = os.execute(tmp)
+  os.remove(tmp)
+  return ok
+end
+
+--- Write arguments to a temp env file, then source it in the script.
+--- This is the safest way to pass arbitrary strings (URLs, paths) to bash.
+local function make_env_file(vars)
+  local tmp = os.tmpname()
+  local f = io.open(tmp, "w")
+  if not f then die("Cannot create env file") end
+  for k, v in pairs(vars) do
+    -- Use printf %s to write the value verbatim into the env file
+    f:write(k .. "=" .. "'" .. v:gsub("'", "'\\''") .. "'\n")
+  end
+  f:close()
+  return tmp
 end
 
 -- ── Main ─────────────────────────────────────────────────────────────────────
@@ -48,12 +67,10 @@ end
 local file_url  = os.getenv("FILE_URL")
 local dest_path = os.getenv("DEST_PATH") or ""
 
--- Validate input
 if not file_url or file_url == "" then
   die("FILE_URL environment variable is not set.")
 end
 
--- Derive destination path when the user left it blank
 if dest_path == "" then
   dest_path = "uploads/" .. filename_from_url(file_url)
 end
@@ -61,33 +78,36 @@ end
 print("[INFO] Source URL  : " .. file_url)
 print("[INFO] Destination : " .. dest_path)
 
--- Create parent directories if needed
+-- Write URL and path into an env file so bash never needs to parse them inline
+local env_file = make_env_file({ FILE_URL = file_url, DEST_PATH = dest_path })
+
+-- Create parent directory
 local dir = dirname(dest_path)
 if dir then
   print("[INFO] Creating directory: " .. dir)
-  mkdir_p(dir)
+  local ok = run_script({
+    ". " .. env_file,
+    'mkdir -p "$(dirname "$DEST_PATH")"'
+  })
+  if ok ~= 0 then
+    die("mkdir failed for: " .. dir)
+  end
 end
 
--- Download via curl, passing both paths as positional bash args to avoid quoting issues
---   -L  : follow redirects
---   -f  : fail on HTTP errors (exit 22)
---   -sS : silent but show errors
---   -o  : output file
-local curl_cmd = string.format(
-  "bash -c 'curl -L -f -sS -o \"$1\" \"$2\"' -- %s %s",
-  string.format("%q", dest_path),
-  string.format("%q", file_url)
-)
-
+-- Download the file
 print("[INFO] Downloading...")
-local exit_code = os.execute(curl_cmd)
+local ok = run_script({
+  ". " .. env_file,
+  'curl -L -f -sS -o "$DEST_PATH" "$FILE_URL"'
+})
 
-if exit_code ~= 0 then
-  die("curl failed (exit " .. tostring(exit_code) .. "). "
-      .. "Check that FILE_URL is a valid, publicly accessible direct-download link.")
+os.remove(env_file)
+
+if ok ~= 0 then
+  die("curl failed. Check that FILE_URL is a valid, publicly accessible direct-download link.")
 end
 
--- Sanity check – make sure the file is not empty
+-- Sanity check
 local f = io.open(dest_path, "rb")
 if not f then
   die("Downloaded file not found at: " .. dest_path)
