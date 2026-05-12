@@ -1,0 +1,45 @@
+name: Download & Upload File
+
+on:
+  workflow_dispatch:
+    inputs:
+      file_url:
+        description: "Direct URL of the file to download"
+        required: true
+        type: string
+      destination_path:
+        description: "Path in the repo to save the file (e.g. assets/file.zip)"
+        required: false
+        default: ""
+      commit_message:
+        description: "Commit message (optional)"
+        required: false
+        default: "chore: upload downloaded file via workflow"
+
+jobs:
+  download-and-upload:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Lua
+        run: sudo apt-get install -y lua5.4
+
+      - name: Run Lua downloader script
+        env:
+          FILE_URL: ${{ github.event.inputs.file_url }}
+          DEST_PATH: ${{ github.event.inputs.destination_path }}
+        run: lua scripts/download_file.lua
+
+      - name: Commit and push uploaded file
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "${{ github.event.inputs.commit_message }}"
+          git push
