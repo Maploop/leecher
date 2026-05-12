@@ -16,7 +16,6 @@ local function die(msg)
   os.exit(1)
 end
 
---- Run a command; die on failure. Works with Lua 5.1 and 5.4.
 local function run(cmd)
   local result = os.execute(cmd)
   -- Lua 5.4 returns true/false; Lua 5.1 returns exit code
@@ -26,7 +25,13 @@ local function run(cmd)
   end
 end
 
---- Extract just the filename from a URL (last path segment before any ? or #).
+local function capture(cmd)
+  local handle = io.popen("bash -c " .. string.format("%q", cmd))
+  local out = handle:read("*a")
+  handle:close()
+  return out:match("^%s*(.-)%s*$")
+end
+
 local function filename_from_url(url)
   local name = url:match(".+/([^/?#]+)")
   if not name or name == "" then
@@ -35,9 +40,12 @@ local function filename_from_url(url)
   return name
 end
 
---- Extract the directory portion of a path.
 local function dirname(path)
   return path:match("^(.*)/[^/]+$")
+end
+
+local function sq(s)
+  return "'" .. s:gsub("'", "'\\''") .. "'"
 end
 
 -- ── Main ─────────────────────────────────────────────────────────────────────
